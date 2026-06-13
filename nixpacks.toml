@@ -1,0 +1,4 @@
+[install]
+apt-get = ["ffmpeg"]
+
+[phases.setup]
