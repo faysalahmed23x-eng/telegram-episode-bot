@@ -74,11 +74,13 @@ async def download_episode(url, title):
         
         # yt-dlp অপশন
         ydl_opts = {
-            'format': 'best',
-            'outtmpl': output_file,
-            'cookiefile': COOKIES_FILE, # গিটহাবে থাকা কুকি ফাইল
-            'quiet': False,
-        }
+    'format': 'best',
+    'outtmpl': output_file,
+    'cookiefile': COOKIES_FILE,
+    'quiet': False,
+    'nocheckcertificate': True, # অনেক সময় সাইটের সার্টিফিকেটের কারণে এরর দেয়, এটি দিলে কাজ করতে পারে
+    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', # ফেক ব্রাউজার এজেন্ট
+}
         
         # ডাউনলোড প্রসেস
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
