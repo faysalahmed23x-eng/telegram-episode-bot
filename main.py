@@ -140,50 +140,91 @@ def cookies_to_header(cookies):
     return f"Cookie: {cookie_str}"
 
 async def download_episode(url, title):
-    """FFmpeg দিয়ে এপিসোড ডাউনলোড করুন"""
+    """yt-dlp দিয়ে এপিসোড ডাউনলোড করুন (FFmpeg ফলব্যাক সহ)"""
     try:
-        safe_title = title.replace('/', '-').replace('\\', '-')[:50]
+        safe_title = title.replace('/', '-').replace('\\', '-').replace(':', '-')[:50]
         output_file = os.path.join(DOWNLOADS_DIR, f"{safe_title}.mp4")
         
         logger.info(f"📥 ডাউনলোড শুরু: {url}")
         
-        cookies = load_cookies()
-        cookie_header = cookies_to_header(cookies)
+        # প্রথমে yt-dlp চেষ্টা করুন
+        try:
+            cmd = [
+                'yt-dlp',
+                '-f', 'best',
+                '-o', output_file,
+                '--quiet',
+                '--progress',
+                url
+            ]
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0 and os.path.exists(output_file):
+                file_size_mb = os.path.getsize(output_file) / 1024 / 1024
+                logger.info(f"✅ yt-dlp দিয়ে ডাউনলোড সফল: {file_size_mb:.2f} MB")
+                return {
+                    'success': True,
+                    'file': output_file,
+                    'size_mb': file_size_mb
+                }
+            else:
+                stderr_msg = stderr.decode()[:200] if stderr else "অজানা ত্রুটি"
+                logger.warning(f"⚠️ yt-dlp ব্যর্থ: {stderr_msg}")
+                # FFmpeg এ যান
+                raise Exception("yt-dlp failed")
         
-        cmd = [
-            'ffmpeg',
-            '-i', url,
-            '-c', 'copy',
-            output_file
-        ]
-        
-        if cookie_header:
-            cmd.insert(1, '-headers')
-            cmd.insert(2, cookie_header)
-        
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
-        stdout, stderr = await process.communicate()
-        
-        if process.returncode == 0 and os.path.exists(output_file):
-            file_size_mb = os.path.getsize(output_file) / 1024 / 1024
-            logger.info(f"✅ ডাউনলোড সফল: {file_size_mb:.2f} MB")
-            return {
-                'success': True,
-                'file': output_file,
-                'size_mb': file_size_mb
-            }
-        else:
-            logger.error(f"FFmpeg ত্রুটি: {stderr.decode()[:200]}")
-            return {'success': False, 'error': 'FFmpeg ত্রুটি'}
+        except Exception as yt_dlp_error:
+            logger.info("📥 FFmpeg ফলব্যাক চেষ্টা করছি...")
+            
+            # FFmpeg ফলব্যাক
+            cookies = load_cookies()
+            cookie_header = cookies_to_header(cookies)
+            
+            cmd = [
+                'ffmpeg',
+                '-allowed_extensions', 'ALL',
+                '-i', url,
+                '-c', 'copy',
+                '-bsf:a', 'aac_adtstoasc',
+                '-y',  # Overwrite output file
+                output_file
+            ]
+            
+            if cookie_header:
+                cmd.insert(1, '-headers')
+                cmd.insert(2, cookie_header)
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0 and os.path.exists(output_file):
+                file_size_mb = os.path.getsize(output_file) / 1024 / 1024
+                logger.info(f"✅ FFmpeg দিয়ে ডাউনলোড সফল: {file_size_mb:.2f} MB")
+                return {
+                    'success': True,
+                    'file': output_file,
+                    'size_mb': file_size_mb
+                }
+            else:
+                error_msg = stderr.decode()[:200] if stderr else "অজানা ত্রুটি"
+                logger.error(f"❌ FFmpeg ত্রুটি: {error_msg}")
+                return {'success': False, 'error': 'ডাউনলোড ব্যর্থ - লিংক অনুপলব্ধ বা সুরক্ষিত'}
     
     except Exception as e:
-        logger.error(f"ডাউনলোড ত্রুটি: {e}")
-        return {'success': False, 'error': str(e)}
+        logger.error(f"❌ ডাউনলোড ত্রুটি: {e}")
+        return {'success': False, 'error': f'ত্রুটি: {str(e)[:100]}'}
 
 # ========================
 # BOT COMMANDS
@@ -382,10 +423,19 @@ class EpisodeDownloaderBot:
                     )
                 else:
                     # ছোট ফাইল পাঠান
-                    with open(result['file'], 'rb') as f:
-                        await update.message.reply_video(
-                            video=f,
-                            caption=f"✅ {title}\n📊 {file_size:.2f} MB",
+                    try:
+                        with open(result['file'], 'rb') as f:
+                            await update.message.reply_video(
+                                video=f,
+                                caption=f"✅ {title}\n📊 {file_size:.2f} MB",
+                            )
+                    except Exception as e:
+                        await status_msg.edit_text(
+                            f"✅ <b>ডাউনলোড সফল!</b>\n\n"
+                            f"📺 {title}\n"
+                            f"📊 সাইজ: <b>{file_size:.2f} MB</b>\n"
+                            f"⚠️ ফাইল পাঠাতে ত্রুটি: {str(e)[:50]}",
+                            parse_mode='HTML'
                         )
             else:
                 add_download_record(user_id, title, link, 'failed')
