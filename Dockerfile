@@ -1,5 +1,5 @@
 # বেস ইমেজ (যেমন পাইথন)
-FROM python:3.9-slim
+FROM python:3.11-slim
 
 # FFmpeg এবং অন্যান্য টুলস ইনস্টল করা
 RUN apt-get update && \
